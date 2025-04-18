@@ -1,18 +1,31 @@
 #include <Arduino.h>
-
-// put function declarations here:
-int myFunction(int, int);
+#include "clock.hpp"
 
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+  Serial.begin(9600);
+  time::xMutex = xSemaphoreCreateMutex();
+
+  TaskHandle_t clock_task;
+  xTaskCreate(
+    time::prvClockMain,   // Task function
+    "ClockMain",     // Name of the task
+    configMINIMAL_STACK_SIZE,                // Stack size (in words, not bytes)
+    NULL,     // Task input parameter
+    2,                   // Priority of the task
+    &clock_task                 // Task handle
+  );  
+
+  xTaskCreate(
+    time::prvUpdateTime,   // Task function
+    "UpdateTime",     // Name of the task
+    configMINIMAL_STACK_SIZE,                // Stack size (in words, not bytes)
+    &clock_task,     // Task input parameter
+    3,                   // Priority of the task
+    NULL                 // Task handle
+  );
+  vTaskStartScheduler();
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-}
 
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
 }

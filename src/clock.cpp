@@ -1,31 +1,52 @@
 #include "clock.hpp"
 #include <Arduino.h>
 
-namespace time{
+extern SemaphoreHandle_t xMutex;
 
-std::tm current_time = {};
-SemaphoreHandle_t xMutex;
+namespace time_tracker{
+
+std::tm current_time = {0, 0, 0, 0, 0, 0, 0, 0, 0}; // Initialize current_time to zero
+TaskHandle_t clock_task = NULL;
+
 
 std::tm getCurrentTime()
 {
-  auto now = std::chrono::system_clock::now();
-  std::time_t now_time = std::chrono::system_clock::to_time_t(now);
-  std::tm local_time = *std::localtime(&now_time);
+  time_t now;
+  time(&now);
+  struct tm local_time;
+  localtime_r(&now, &local_time);
   return local_time;
 }
 
 void prvUpdateTime(void* pvParameters)
 {
-  auto clock_task = static_cast<TaskHandle_t*>(pvParameters);
+  if (xMutex == NULL) {
+    Serial.println("xMutex is NULL, cannot proceed.");
+    vTaskDelete(NULL); // Exit the task if mutex is not initialized
+  }
+  if (clock_task == NULL) {
+    Serial.println("clock_task is NULL, cannot proceed.");
+    vTaskDelete(NULL); // Exit the task if clock_task is not initialized
+  }
+
+  std::tm new_time;
   while (1) {
-    auto time_now = getCurrentTime();
-    if (time_now.tm_hour != current_time.tm_hour || time_now.tm_min != current_time.tm_min || time_now.tm_sec != current_time.tm_sec) {
+    Serial.println("Checking time...");
+    new_time = getCurrentTime();
+
+    if (new_time.tm_hour != current_time.tm_hour ||
+        new_time.tm_min != current_time.tm_min ||
+        new_time.tm_sec != current_time.tm_sec) {
       // need to update time!!
-      Serial.printf("updating time to %d:%d:%d\n", time_now.tm_hour, time_now.tm_min, time_now.tm_sec);
+      Serial.printf("updating time to %d:%d:%d\n", new_time.tm_hour, new_time.tm_min, new_time.tm_sec);
       xSemaphoreTake(xMutex, portMAX_DELAY);
-      current_time = time_now;
+      Serial.println("Got mutex, updating time...");
+      current_time = new_time;
+      Serial.printf("Updated time to %d:%d:%d\n", new_time.tm_hour, new_time.tm_min, new_time.tm_sec);
       xSemaphoreGive(xMutex);
-      xTaskNotify(*clock_task, kTimeUpdate, eNoAction);
+      Serial.println("Giving mutex, notifying clock task...");
+      xTaskNotify(clock_task, kTimeUpdate, eSetBits);
+      Serial.println("Notified clock task.");
     }
     vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 1s
   }
@@ -36,8 +57,10 @@ void prvClockMain(void* pvParameters) {
   std::tm cur_time;
   while (1) {
     // Wait for a notification indefinitely
+    Serial.println("Waiting for notification...");
     if (xTaskNotifyWait(0, 0xFFFFFFFF, &notificationValue, portMAX_DELAY) == pdTRUE) {
       // Process the notification
+      Serial.printf("Notification received: %d\n", notificationValue);
       if (notificationValue & kTimeUpdate) {
         xSemaphoreTake(xMutex, portMAX_DELAY);
         cur_time = current_time;
@@ -45,7 +68,37 @@ void prvClockMain(void* pvParameters) {
         Serial.printf("Time updated! New time is %d:%d:%d\n", cur_time.tm_hour, cur_time.tm_min, cur_time.tm_sec);
       }
     }
+    vTaskDelay(pdMS_TO_TICKS(30));
   }
 }
 
-} // namespace time
+void beginTasks() {
+  xTaskCreate(
+    time_tracker::prvClockMain,   // Task function
+    "ClockMain",     // Name of the task
+    2048,                // Stack size (in words, not bytes)
+    NULL,     // Task input parameter
+    2,                   // Priority of the task
+    &clock_task                 // Task handle
+  );  
+
+
+  Serial.println("Starting time task...");
+  xTaskCreate(
+    time_tracker::prvUpdateTime,   // Task function
+    "UpdateTime",     // Name of the task
+    2048,                // Stack size (in words, not bytes)
+    NULL,     // Task input parameter
+    3,                   // Priority of the task
+    NULL                 // Task handle
+  );
+}
+
+void IRAM_ATTR handleInterruptStartTimer() {
+  if (clock_task == NULL) return;
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  xTaskNotifyFromISR(clock_task, kAlarmInit, eSetBits, &xHigherPriorityTaskWoken);
+  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+} // namespace time_tracker

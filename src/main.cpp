@@ -1,29 +1,24 @@
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/FreeRTOSConfig.h>
+#include <freertos/task.h>
 #include "clock.hpp"
+
+SemaphoreHandle_t xMutex;
+const int kInterruptPin = 15;
 
 void setup() {
   Serial.begin(9600);
-  time::xMutex = xSemaphoreCreateMutex();
+  xMutex = xSemaphoreCreateMutex();
+  
+  Serial.println("Starting clock task...");
+  
+  time_tracker::beginTasks();
 
-  TaskHandle_t clock_task;
-  xTaskCreate(
-    time::prvClockMain,   // Task function
-    "ClockMain",     // Name of the task
-    configMINIMAL_STACK_SIZE,                // Stack size (in words, not bytes)
-    NULL,     // Task input parameter
-    2,                   // Priority of the task
-    &clock_task                 // Task handle
-  );  
+  pinMode(kInterruptPin, INPUT);
+  attachInterrupt(digitalPinToInterrupt(kInterruptPin), time_tracker::handleInterrupt, FALLING);
 
-  xTaskCreate(
-    time::prvUpdateTime,   // Task function
-    "UpdateTime",     // Name of the task
-    configMINIMAL_STACK_SIZE,                // Stack size (in words, not bytes)
-    &clock_task,     // Task input parameter
-    3,                   // Priority of the task
-    NULL                 // Task handle
-  );
-  vTaskStartScheduler();
+  // vTaskStartScheduler();
 }
 
 void loop() {

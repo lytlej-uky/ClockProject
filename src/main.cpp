@@ -5,7 +5,9 @@
 #include "clock.hpp"
 
 SemaphoreHandle_t xMutex;
-const int kInterruptPin = 15;
+const int kInterruptPinStartTimer = 15;
+const int kInterruptPinIncMins = 18;
+const int kInterruptPinIncHrs = 19;
 
 void setup() {
   Serial.begin(9600);
@@ -15,8 +17,12 @@ void setup() {
   
   time_tracker::beginTasks();
 
-  pinMode(kInterruptPin, INPUT);
-  attachInterrupt(digitalPinToInterrupt(kInterruptPin), time_tracker::handleInterrupt, FALLING);
+  pinMode(kInterruptPinStartTimer, INPUT);
+  pinMode(kInterruptPinIncMins, INPUT);
+  pinMode(kInterruptPinIncHrs, INPUT);
+  attachInterrupt(digitalPinToInterrupt(kInterruptPinStartTimer), time_tracker::handleInterruptStartTimer, FALLING);
+  attachInterrupt(digitalPinToInterrupt(kInterruptPinIncMins), time_tracker::handleInterruptIncMins, FALLING);
+  attachInterrupt(digitalPinToInterrupt(kInterruptPinIncHrs), time_tracker::handleInterruptIncHrs, FALLING);
 
   // vTaskStartScheduler();
 }

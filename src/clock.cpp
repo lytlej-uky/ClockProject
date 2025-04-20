@@ -7,7 +7,10 @@ namespace time_tracker{
 
 std::tm current_time = {0, 0, 0, 0, 0, 0, 0, 0, 0}; // Initialize current_time to zero
 TaskHandle_t clock_task = NULL;
-
+unsigned long last_interrupt_time = 0;
+const unsigned long debounce_delay = 250;
+int timerMinutes = 0;
+int timerHours = 0;
 
 std::tm getCurrentTime()
 {
@@ -67,8 +70,19 @@ void prvClockMain(void* pvParameters) {
         xSemaphoreGive(xMutex);
         Serial.printf("Time updated! New time is %d:%d:%d\n", cur_time.tm_hour, cur_time.tm_min, cur_time.tm_sec);
       }
+      if (notificationValue & kAlarmInit) {
+        Serial.println("Alarm init");
+      }
+      if (notificationValue & kAlarmIncMin) {
+        Serial.println("Minutes ++");
+      }
+      if (notificationValue & kAlarmIncHr) {
+        Serial.println("Hours ++");
+      }
+      if (notificationValue & kAlarmEnd) {
+        Serial.println("ALARM!!!!!!!!!!!!!!!");
+      }
     }
-    vTaskDelay(pdMS_TO_TICKS(30));
   }
 }
 
@@ -95,10 +109,39 @@ void beginTasks() {
 }
 
 void IRAM_ATTR handleInterruptStartTimer() {
-  if (clock_task == NULL) return;
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  xTaskNotifyFromISR(clock_task, kAlarmInit, eSetBits, &xHigherPriorityTaskWoken);
-  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  unsigned long current_time = millis();
+  if (current_time - last_interrupt_time > debounce_delay) {
+    last_interrupt_time = current_time;
+
+    // Perform your interrupt action or notify a task
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xTaskNotifyFromISR(clock_task, kAlarmInit, eSetBits, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  }
+}
+
+void IRAM_ATTR handleInterruptIncMins() {
+  unsigned long current_time = millis();
+  if (current_time - last_interrupt_time > debounce_delay) {
+    last_interrupt_time = current_time;
+
+    // Perform your interrupt action or notify a task
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xTaskNotifyFromISR(clock_task, kAlarmIncMin, eSetBits, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  }
+}
+
+void IRAM_ATTR handleInterruptIncHrs() { 
+  unsigned long current_time = millis();
+  if (current_time - last_interrupt_time > debounce_delay) {
+    last_interrupt_time = current_time;
+
+    // Perform your interrupt action or notify a task
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xTaskNotifyFromISR(clock_task, kAlarmIncHr, eSetBits, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  }
 }
 
 } // namespace time_tracker

@@ -5,6 +5,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
+#include <string>
 #include <chrono>
 
 namespace time_tracker{
@@ -20,6 +21,8 @@ std::tm getCurrentTime();
 
 void prvUpdateTime(void* pvParameters);
 void prvClockMain(void* pvParameters);
+void prvDisplay(void* pvParameters);
+std::string formatTime(int hour, int minute);
 void beginTasks();
 void IRAM_ATTR handleInterruptStartTimer();
 void IRAM_ATTR handleInterruptIncMins();

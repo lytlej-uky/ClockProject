@@ -16,12 +16,18 @@ const int kAlarmIncMin{4};
 const int kAlarmIncHr{8};
 const int kAlarmEnd{16};
 
+struct timerArgs{
+  int minutes;
+  int hours;
+};
+
 // Returns the current time as std::tm
 std::tm getCurrentTime();
 
 void prvUpdateTime(void* pvParameters);
 void prvClockMain(void* pvParameters);
 void prvDisplay(void* pvParameters);
+void prvTimer(void* pvParameters);
 std::string formatTime(int hour, int minute);
 void beginTasks();
 void IRAM_ATTR handleInterruptStartTimer();

@@ -15,12 +15,12 @@ TaskHandle_t clock_task = NULL;
 TaskHandle_t display_task = NULL;
 unsigned long last_interrupt_time = 0;
 const unsigned long debounce_delay = 250;
-int timerMinutes = 0;
-int timerHours = 0;
+timerArgs timer{0,0};
 int min_adjust = 0;
 int hour_adjust = 0;
 std::string display_data;
 bool colon = false;
+bool alarmConfig = false;
 
 std::tm getCurrentTime()
 {
@@ -51,81 +51,163 @@ void prvUpdateTime(void* pvParameters)
 
   std::tm new_time;
   while (1) {
-    Serial.println("Checking time...");
     new_time = getCurrentTime();
 
     if (new_time.tm_hour != current_time.tm_hour ||
         new_time.tm_min != current_time.tm_min ||
         new_time.tm_sec != current_time.tm_sec) {
       // need to update time!!
-      Serial.printf("updating time to %d:%d:%d\n", new_time.tm_hour, new_time.tm_min, new_time.tm_sec);
       xSemaphoreTake(clockMutex, portMAX_DELAY);
-      Serial.println("Got mutex, updating time...");
       current_time = new_time;
-      Serial.printf("Updated time to %d:%d:%d\n", new_time.tm_hour, new_time.tm_min, new_time.tm_sec);
       xSemaphoreGive(clockMutex);
-      Serial.println("Giving mutex, notifying clock task...");
       xTaskNotify(clock_task, kTimeUpdate, eSetBits);
-      Serial.println("Notified clock task.");
     }
     vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 1s
   }
 }
 
 void prvClockMain(void* pvParameters) {
-  uint32_t notificationValue;
-  std::tm cur_time;
-  while (1) {
-    // Wait for a notification indefinitely
-    Serial.println("Waiting for notification...");
-    if (xTaskNotifyWait(0, 0xFFFFFFFF, &notificationValue, portMAX_DELAY) == pdTRUE) {
-      // Process the notification
-      Serial.printf("Notification received: %d\n", notificationValue);
-      if (notificationValue & kTimeUpdate) {
-        cur_time = current_time;
-        xSemaphoreTake(clockMutex, portMAX_DELAY);
-        display_data = formatTime(cur_time.tm_hour, cur_time.tm_min);
-        xSemaphoreGive(clockMutex);
-        Serial.printf("Time updated! New time is %d:%d:%d\n", cur_time.tm_hour, cur_time.tm_min, cur_time.tm_sec);
-        xTaskNotify(display_task, kTimeUpdate, eNoAction);
-        colon = !colon; // Toggle colon for display
-      }
-      if (notificationValue & kAlarmInit) {
-        Serial.println("Alarm init");
-      }
-      if (notificationValue & kAlarmIncMin) {
-        Serial.println("Minutes ++");
-        if (min_adjust == 59) {
-          min_adjust = 0; // Reset to 0 if it was 59
-          hour_adjust = (hour_adjust + 1) % 12; // Increment hour and wrap around
-        } else {
-          min_adjust = (min_adjust + 1) % 60; // Increment min and wrap around
-        }
-      }
-      if (notificationValue & kAlarmIncHr) {
-        Serial.println("Hours ++");
-        hour_adjust = (hour_adjust + 1) % 12; // Increment hour and wrap around
+    uint32_t notificationValue;
+    std::tm cur_time;
+    while (1) {
+        // Wait for a notification indefinitely
+        Serial.println("Waiting for notification...");
+        if (xTaskNotifyWait(0, 0xFFFFFFFF, &notificationValue, portMAX_DELAY) == pdTRUE) {
+            // Process the notification
+            Serial.printf("Notification received: %d\n", notificationValue);
+            if (notificationValue & kTimeUpdate) {
+                cur_time = current_time;
+                if (!alarmConfig) {
+                    xSemaphoreTake(clockMutex, portMAX_DELAY);
+                    display_data = formatTime(cur_time.tm_hour, cur_time.tm_min);
+                    xSemaphoreGive(clockMutex);
+                    xTaskNotify(display_task, kTimeUpdate, eSetBits);
+                }
+                colon = !colon; // Toggle colon for display
+            }
+            if (notificationValue & kAlarmInit) {
+                Serial.println("Alarm init triggered");
+                xTaskNotify(display_task, kAlarmInit, eSetBits);
+                alarmConfig = !alarmConfig; // Toggle alarmConfig
+                if (!alarmConfig) {
+                  xTaskCreate(
+                    time_tracker::prvTimer,   // Task function
+                    "Timer",                 // Name of the task
+                    2048,                    // Stack size (in words, not bytes)
+                    NULL,                  // Task input parameter
+                    2,                       // Priority of the task
+                    NULL                     // Task handle
+                  );
+                } else {
+                  // Reset display to current time after alarm ends
+                  timer.minutes = 0;
+                  timer.hours = 0;
+                  xSemaphoreTake(clockMutex, portMAX_DELAY);
+                  display_data = formatTime(current_time.tm_hour, current_time.tm_min);
+                  xSemaphoreGive(clockMutex);
+                  xTaskNotify(display_task, kAlarmInit, eSetBits);
+                }
+            }
+            if (notificationValue & kAlarmIncMin) {
+                Serial.println("Minutes ++");
+                if (alarmConfig) {
+                    timer.minutes = (timer.minutes + 1) % 60;
+                    display_data = formatTime(timer.hours, timer.minutes);
+                    xTaskNotify(display_task, kAlarmInit, eSetBits);
+                } else {
+                    if (min_adjust == 59) {
+                        min_adjust = 0; // Reset to 0 if it was 59
+                        hour_adjust = (hour_adjust + 1) % 12; // Increment hour and wrap around
+                    } else {
+                        min_adjust = (min_adjust + 1) % 60; // Increment min and wrap around
+                    }
+                }
+            }
 
-      }
-      if (notificationValue & kAlarmEnd) {
-        Serial.println("ALARM!!!!!!!!!!!!!!!");
-      }
+            if (notificationValue & kAlarmIncHr) {
+                Serial.println("Hours ++");
+                if (alarmConfig) {
+                    timer.hours = (timer.hours + 1) % 12;
+                    display_data = formatTime(timer.hours, timer.minutes);
+                    xTaskNotify(display_task, kTimeUpdate, eSetBits);
+                } else {
+                    hour_adjust = (hour_adjust + 1) % 12; // Increment hour and wrap around
+                }
+            }
+            if (notificationValue & kAlarmEnd) {
+                Serial.println("ALARM!!!!!!!!!!!!!!!");
+                xTaskNotify(display_task, kAlarmEnd, eSetBits);
+                alarmConfig = false; // Reset alarmConfig after alarm ends
+                // Reset display to current time
+                xSemaphoreTake(clockMutex, portMAX_DELAY);
+                display_data = formatTime(current_time.tm_hour, current_time.tm_min);
+                xSemaphoreGive(clockMutex);
+                xTaskNotify(display_task, kTimeUpdate, eSetBits);
+            }
+        }
     }
-  }
 }
 
 void prvDisplay(void* pvParameters) {
-  while (1) {
-    uint32_t notificationValue;
-    if (xTaskNotifyWait(0, 0xFFFFFFFF, &notificationValue, portMAX_DELAY) == pdTRUE) {
-      // Process the notification
-      Serial.printf("Display notification received: %d\n", notificationValue);
-      xSemaphoreTake(displayMutex, portMAX_DELAY);
-      ledMatrix.setTextAlignment(PA_RIGHT);
-      ledMatrix.print(display_data.c_str()); // display text
-      xSemaphoreGive(displayMutex);
+    while (1) {
+        uint32_t notificationValue;
+        if (xTaskNotifyWait(0, 0xFFFFFFFF, &notificationValue, portMAX_DELAY) == pdTRUE) {
+            // Process the notification
+            if (notificationValue & kAlarmInit) {
+                Serial.println("Alarm init triggered");
+                xSemaphoreTake(displayMutex, portMAX_DELAY);
+                ledMatrix.setTextAlignment(PA_CENTER);
+                ledMatrix.print(display_data.c_str()); // Display alarm timer
+                xSemaphoreGive(displayMutex);
+            }
+            else if (notificationValue & kAlarmEnd) {
+                Serial.println("ALARM!!!!!!!!!!!!!!!");
+                xSemaphoreTake(displayMutex, portMAX_DELAY);
+                ledMatrix.setTextAlignment(PA_CENTER);
+                ledMatrix.print("ALARM"); // Display "ALARM"
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 5s
+                ledMatrix.displayClear();
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 5s
+                ledMatrix.print("ALARM"); // Display "ALARM"
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 5s
+                ledMatrix.displayClear();
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 5s
+                ledMatrix.print("ALARM"); // Display "ALARM"
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 5s
+                ledMatrix.displayClear();
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 5s
+                ledMatrix.print("ALARM"); // Display "ALARM"
+                vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 5s
+                ledMatrix.displayClear();
+                xSemaphoreGive(displayMutex);
+            }
+            else {
+                Serial.printf("Display notification received: %d\n", notificationValue);
+                xSemaphoreTake(displayMutex, portMAX_DELAY);
+                ledMatrix.setTextAlignment(PA_RIGHT);
+                ledMatrix.print(display_data.c_str()); // Display current time
+                xSemaphoreGive(displayMutex);
+            }
+        }
     }
+}
+
+void prvTimer(void* pvParameters) {
+  timerArgs timeArg = timer;
+  Serial.printf("Timer started with %d hours and %d minutes\n", timeArg.hours, timeArg.minutes);
+  timerArgs endTime{current_time.tm_min, current_time.tm_hour};
+  endTime.hours = (endTime.hours + timeArg.hours + (endTime.minutes + timeArg.minutes)/60) % 12;
+  endTime.minutes = (endTime.minutes + timeArg.minutes) % 60;
+  while (1) {
+    std::tm cur_time = getCurrentTime();
+    if (cur_time.tm_min >= endTime.minutes && cur_time.tm_hour >= endTime.hours) {
+      Serial.println("ALARM!!!!!!!!!!!!!!!");
+      xTaskNotify(clock_task, kAlarmEnd, eSetBits);
+      break; // Exit the loop after alarm is triggered
+    }
+    vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 1s
   }
+  vTaskDelete(NULL); // Delete the task after completion
 }
 
 
